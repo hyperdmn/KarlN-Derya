@@ -26,6 +26,7 @@ public class PlayerMovement : MonoBehaviour
 
             if (Physics.Raycast(ray, out hit))
             {
+                // Check for Derya's movement by using the "Target" tag for waiter
                 if (hit.transform.CompareTag("Target"))
                 {
                     target = hit.transform;

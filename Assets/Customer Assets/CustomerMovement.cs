@@ -11,16 +11,18 @@ public class CustomerMovement : MonoBehaviour
     private Material defaultMaterial;
     public Material highlightedMaterial;
     public int customerCount = 1; // Number of customers (can adjust this based on game logic)
+    private Vector3 originalPosition; // To store the original position of the customer
 
     private void Start()
     {
         zCoord = Camera.main.WorldToScreenPoint(transform.position).z;
         InitializeTableMaterials();
+        originalPosition = transform.position; // Save the starting position
     }
 
     private void InitializeTableMaterials()
     {
-        GameObject[] tables = GameObject.FindGameObjectsWithTag("Target");
+        GameObject[] tables = GameObject.FindGameObjectsWithTag("Table");
         foreach (GameObject table in tables)
         {
             Renderer renderer = table.GetComponent<Renderer>();
@@ -65,6 +67,7 @@ public class CustomerMovement : MonoBehaviour
             else
             {
                 Debug.Log("Customer cannot sit at " + targetTable.name + " - not enough seats.");
+                transform.position = originalPosition; // Return to original position if they cannot sit
             }
         }
 
@@ -74,7 +77,7 @@ public class CustomerMovement : MonoBehaviour
     private void HighlightTargetTable()
     {
         ResetCurrentTableColor();
-        GameObject[] tables = GameObject.FindGameObjectsWithTag("Target");
+        GameObject[] tables = GameObject.FindGameObjectsWithTag("Table");
         GameObject closestTable = null;
         float closestDistance = float.MaxValue;
 
@@ -107,7 +110,7 @@ public class CustomerMovement : MonoBehaviour
     private bool TryDropOnTargetTable(out GameObject targetTable)
     {
         targetTable = null;
-        GameObject[] tables = GameObject.FindGameObjectsWithTag("Target");
+        GameObject[] tables = GameObject.FindGameObjectsWithTag("Table");
 
         foreach (GameObject table in tables)
         {
