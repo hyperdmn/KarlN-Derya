@@ -9,17 +9,11 @@ public class PlayerMovement : MonoBehaviour
     public float stopDistance;
 
     private Transform target;
-    private CustomerMovement customerMovement;
-
-    void Start()
-    {
-        customerMovement = FindObjectOfType<CustomerMovement>();
-    }
 
     void Update()
     {
-        // Only process input if not dragging and no current target is set
-        if (customerMovement != null && !customerMovement.isDragging && Input.GetMouseButtonDown(0))
+        // Check for movement input, regardless of dragging state
+        if (Input.GetMouseButtonDown(0))
         {
             Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
             RaycastHit hit;

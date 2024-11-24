@@ -61,8 +61,19 @@ public class CustomerMovement : MonoBehaviour
         {
             if (ValidateTable(targetTable))
             {
-                transform.position = targetTable.transform.position;
-                Debug.Log("Customer seated at " + targetTable.name);
+                // Position the customer above the chair
+                Transform chairTransform = targetTable.transform.Find("Chair"); // Assuming "Chair" is a child object of the table
+                if (chairTransform != null)
+                {
+                    Vector3 chairPosition = chairTransform.position;
+                    transform.position = new Vector3(chairPosition.x, chairPosition.y + 0.5f, chairPosition.z); // Adjust the Y offset as needed
+                    Debug.Log("Customer seated at " + targetTable.name);
+                }
+                else
+                {
+                    Debug.LogError("Chair not found in table: " + targetTable.name);
+                    transform.position = originalPosition; // Return to original position if chair not found
+                }
             }
             else
             {
