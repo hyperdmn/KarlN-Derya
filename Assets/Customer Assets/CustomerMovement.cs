@@ -7,28 +7,39 @@ public class CustomerMovement : MonoBehaviour
     private Vector3 offset;
     private float zCoord;
     public bool isDragging;
-    private GameObject currentTable;
-    private Material defaultMaterial;
+    private GameObject currentTableGroup;
+    private List<GameObject> currentHighlightedObjects = new List<GameObject>();
+    private Dictionary<GameObject, Material> originalMaterials = new Dictionary<GameObject, Material>();
     public Material highlightedMaterial;
-    public int customerCount = 1; // Number of customers (can adjust this based on game logic)
-    private Vector3 originalPosition; // To store the original position of the customer
+    public Material unavailableMaterial;
+    public int customerCount = 1;
+    private Vector3 originalPosition;
 
     private void Start()
     {
         zCoord = Camera.main.WorldToScreenPoint(transform.position).z;
-        InitializeTableMaterials();
-        originalPosition = transform.position; // Save the starting position
+        StoreOriginalMaterials();
+        originalPosition = transform.position;
     }
 
-    private void InitializeTableMaterials()
+    private void StoreOriginalMaterials()
     {
+        // Find all table objects
         GameObject[] tables = GameObject.FindGameObjectsWithTag("Table");
         foreach (GameObject table in tables)
         {
-            Renderer renderer = table.GetComponent<Renderer>();
-            if (renderer != null)
+            // Get the parent group that contains the table and chairs
+            Transform tableGroup = table.transform.parent;
+            if (tableGroup != null)
             {
-                defaultMaterial = renderer.material;
+                // Store materials for all renderers in the group
+                foreach (Renderer renderer in tableGroup.GetComponentsInChildren<Renderer>())
+                {
+                    if (!originalMaterials.ContainsKey(renderer.gameObject))
+                    {
+                        originalMaterials[renderer.gameObject] = renderer.material;
+                    }
+                }
             }
         }
     }
@@ -50,120 +61,210 @@ public class CustomerMovement : MonoBehaviour
         Vector3 newPosition = GetMouseWorldPosition() - offset;
         newPosition.y = Mathf.Max(newPosition.y, 0f);
         transform.position = newPosition;
-        HighlightTargetTable();
+        HighlightTargetTableGroup();
     }
 
     private void OnMouseUp()
     {
         isDragging = false;
 
-        if (TryDropOnTargetTable(out GameObject targetTable))
+        if (TryDropOnTargetTableGroup(out GameObject targetTableGroup))
         {
-            if (ValidateTable(targetTable))
+            if (ValidateTableGroup(targetTableGroup))
             {
-                // Position the customer above the chair
-                Transform chairTransform = targetTable.transform.Find("Chair"); // Assuming "Chair" is a child object of the table
+                Transform chairTransform = GetAvailableChair(targetTableGroup);
                 if (chairTransform != null)
                 {
                     Vector3 chairPosition = chairTransform.position;
-                    transform.position = new Vector3(chairPosition.x, chairPosition.y + 0.5f, chairPosition.z); // Adjust the Y offset as needed
-                    Debug.Log("Customer seated at " + targetTable.name);
+                    transform.position = new Vector3(chairPosition.x, chairPosition.y + 0.5f, chairPosition.z);
+                    transform.SetParent(chairTransform);
+                    Debug.Log($"Customer seated at {targetTableGroup.name} on chair {chairTransform.name}");
                 }
                 else
                 {
-                    Debug.LogError("Chair not found in table: " + targetTable.name);
-                    transform.position = originalPosition; // Return to original position if chair not found
+                    Debug.LogWarning($"No available chair found in: {targetTableGroup.name}. Available chairs: {CountAvailableChairs(targetTableGroup)}");
+                    transform.position = originalPosition;
                 }
             }
             else
             {
-                Debug.Log("Customer cannot sit at " + targetTable.name + " - not enough seats.");
-                transform.position = originalPosition; // Return to original position if they cannot sit
+                Debug.Log($"Customer cannot sit at {targetTableGroup.name} - not enough seats or invalid table size.");
+                transform.position = originalPosition;
             }
         }
+        else
+        {
+            transform.position = originalPosition;
+        }
 
-        ResetCurrentTableColor();
+        ResetHighlights();
     }
 
-    private void HighlightTargetTable()
+    private void HighlightTargetTableGroup()
     {
-        ResetCurrentTableColor();
+        ResetHighlights();
         GameObject[] tables = GameObject.FindGameObjectsWithTag("Table");
-        GameObject closestTable = null;
+        GameObject closestTableGroup = null;
         float closestDistance = float.MaxValue;
 
         foreach (GameObject table in tables)
         {
-            if (IsOverTable(table))
+            Transform tableGroup = table.transform.parent;
+            if (tableGroup != null && IsOverTableGroup(tableGroup.gameObject))
             {
-                float distance = Vector3.Distance(transform.position, table.transform.position);
+                float distance = Vector3.Distance(transform.position, tableGroup.position);
                 if (distance < closestDistance)
                 {
                     closestDistance = distance;
-                    closestTable = table;
+                    closestTableGroup = tableGroup.gameObject;
                 }
             }
         }
 
-        if (closestTable != null)
+        if (closestTableGroup != null)
         {
-            ColorTable(closestTable, true);
-            currentTable = closestTable;
+            currentTableGroup = closestTableGroup;
+            bool isValid = ValidateTableGroup(closestTableGroup);
+
+            // Highlight everything in the group
+            foreach (Renderer renderer in closestTableGroup.GetComponentsInChildren<Renderer>())
+            {
+                GameObject obj = renderer.gameObject;
+                bool isChair = obj.name.ToLower().Contains("chair");
+                
+                // If it's a chair, check if it's available
+                if (isChair)
+                {
+                    bool isChairAvailable = !HasCustomer(obj.transform);
+                    ColorObject(obj, isValid && isChairAvailable);
+                }
+                else
+                {
+                    ColorObject(obj, isValid);
+                }
+                currentHighlightedObjects.Add(obj);
+            }
+
+            Debug.Log($"Highlighting {closestTableGroup.name}, Valid: {isValid}, Available Chairs: {CountAvailableChairs(closestTableGroup)}");
         }
     }
 
-    private bool IsOverTable(GameObject table)
+    private bool IsOverTableGroup(GameObject tableGroup)
     {
-        float distance = Vector3.Distance(transform.position, table.transform.position);
-        return distance < 1.5f;
+        // Create a combined bounds from all renderers in the group
+        Bounds combinedBounds = new Bounds(tableGroup.transform.position, Vector3.zero);
+        foreach (Renderer renderer in tableGroup.GetComponentsInChildren<Renderer>())
+        {
+            combinedBounds.Encapsulate(renderer.bounds);
+        }
+        
+        // Expand bounds for easier detection
+        combinedBounds.Expand(2.5f);
+        return combinedBounds.Contains(transform.position);
     }
 
-    private bool TryDropOnTargetTable(out GameObject targetTable)
+    private bool TryDropOnTargetTableGroup(out GameObject targetTableGroup)
     {
-        targetTable = null;
+        targetTableGroup = null;
         GameObject[] tables = GameObject.FindGameObjectsWithTag("Table");
+        float closestDistance = float.MaxValue;
 
         foreach (GameObject table in tables)
         {
-            if (IsOverTable(table))
+            Transform group = table.transform.parent;
+            if (group != null && IsOverTableGroup(group.gameObject))
             {
-                targetTable = table;
-                return true;
+                float distance = Vector3.Distance(transform.position, group.position);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    targetTableGroup = group.gameObject;
+                }
             }
         }
 
-        return false;
+        return targetTableGroup != null;
     }
 
-    private bool ValidateTable(GameObject table)
+    private bool ValidateTableGroup(GameObject tableGroup)
     {
-        // Check if the table fits the customer count
-        if (table.name.Contains("Small") && customerCount <= 2)
+        if (tableGroup == null) return false;
+
+        string groupName = tableGroup.name.ToLower();
+        int availableChairs = CountAvailableChairs(tableGroup);
+        Debug.Log($"Validating {groupName} - Available chairs: {availableChairs}, Required: {customerCount}");
+
+        // Check if the table is appropriate for the customer count and has enough available chairs
+        if (groupName.Contains("small") && customerCount <= 2 && availableChairs >= customerCount)
         {
             return true;
         }
-        else if (table.name.Contains("Long") && customerCount <= 4)
+        else if (groupName.Contains("long") && customerCount <= 4 && availableChairs >= customerCount)
         {
             return true;
         }
         return false;
     }
 
-    private void ColorTable(GameObject table, bool isValid)
+    private Transform GetAvailableChair(GameObject tableGroup)
     {
-        Renderer renderer = table.GetComponent<Renderer>();
+        if (tableGroup == null) return null;
+
+        // Find all chair objects in the group
+        foreach (Transform child in tableGroup.GetComponentsInChildren<Transform>())
+        {
+            if (child.name.ToLower().Contains("chair") && !HasCustomer(child))
+            {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    private bool HasCustomer(Transform chair)
+    {
+        return chair.childCount > 0 && chair.GetComponentInChildren<CustomerMovement>() != null;
+    }
+
+    private int CountAvailableChairs(GameObject tableGroup)
+    {
+        int count = 0;
+        foreach (Transform child in tableGroup.GetComponentsInChildren<Transform>())
+        {
+            if (child.name.ToLower().Contains("chair") && !HasCustomer(child))
+            {
+                count++;
+            }
+        }
+        Debug.Log($"Found {count} available chairs in {tableGroup.name}");
+        return count;
+    }
+
+    private void ColorObject(GameObject obj, bool isValid)
+    {
+        if (obj == null) return;
+
+        Renderer renderer = obj.GetComponent<Renderer>();
         if (renderer != null)
         {
-            renderer.material = isValid ? highlightedMaterial : defaultMaterial;
+            renderer.material = isValid ? highlightedMaterial : unavailableMaterial;
         }
     }
 
-    private void ResetCurrentTableColor()
+    private void ResetHighlights()
     {
-        if (currentTable != null)
+        foreach (GameObject obj in currentHighlightedObjects)
         {
-            ColorTable(currentTable, false);
-            currentTable = null;
+            if (obj != null)
+            {
+                Renderer renderer = obj.GetComponent<Renderer>();
+                if (renderer != null && originalMaterials.ContainsKey(obj))
+                {
+                    renderer.material = originalMaterials[obj];
+                }
+            }
         }
+        currentHighlightedObjects.Clear();
+        currentTableGroup = null;
     }
 }
