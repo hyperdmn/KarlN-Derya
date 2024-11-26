@@ -66,7 +66,7 @@ public class PlayerMovement : MonoBehaviour
             {
                 // Stop when within the stopping distance
                 isMoving = false;
-                rb.velocity = Vector3.zero; // Ensure the player stops completely
+                velocity = Vector3.zero; // Clear smoothing velocity
             }
         }
     }
